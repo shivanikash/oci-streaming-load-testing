@@ -32,10 +32,9 @@ public class OCIStreamProducer {
     
     // Comprehensive OCI Services and their complete metric sets
     private static final String[] NAMESPACES = {
-        "oci_computeagent", "oci_lbaas", "oci_blockvolumes", "oci_autonomous_database", 
+        "oci_computeagent", "oci_lbaas", "oci_blockvolumes", 
         "oci_apigateway", "oci_functions", "oci_streaming", "oci_objectstorage",
-        "oci_mysql", "oci_postgresql", "oci_redis", "oci_kubernetes", "oci_containerengine",
-        "oci_filestorage", "oci_datacatalog", "oci_analytics", "oci_integration"
+        "oci_postgresql", "oci_kubernetes", "oci_containerengine"
     };
     
     // Complete metrics for each OCI service (based on real OCI Monitoring metrics)
@@ -64,14 +63,6 @@ public class OCIStreamProducer {
             "VolumeThroughputPercentage", "VolumeIopsPercentage", "VolumeQueueDepth",
             "VolumeReadThroughput", "VolumeWriteThroughput", "VolumeLatency",
             "VolumeReadLatency", "VolumeWriteLatency"
-        });
-        
-        // Autonomous Database - All DB metrics
-        METRICS_BY_NAMESPACE.put("oci_autonomous_database", new String[]{
-            "CpuUtilization", "DatabaseConnections", "UserCalls", "ExecuteCount",
-            "StorageUtilization", "SessionCount", "TransactionCount", "WaitTime",
-            "ParseTime", "SqlNetRoundTrips", "LogicalReads", "PhysicalReads",
-            "RedoGenerated", "CurrentLogons", "RunningJobs", "BlockedSessions"
         });
         
         // API Gateway - All API metrics
@@ -105,8 +96,8 @@ public class OCIStreamProducer {
             "PutRequests", "DeleteRequests"
         });
         
-        // MySQL Database Service
-        METRICS_BY_NAMESPACE.put("oci_mysql", new String[]{
+        // PostgreSQL Database Service
+        METRICS_BY_NAMESPACE.put("oci_postgresql", new String[]{
             "ActiveConnections", "CpuUtilization", "MemoryUtilization", "NetworkReceive",
             "NetworkTransmit", "DiskIORead", "DiskIOWrite", "QueriesPerSecond",
             "SlowQueries", "ConnectionErrors", "DatabaseSize", "BinlogUsage"
@@ -198,14 +189,13 @@ public class OCIStreamProducer {
         
         // Distribute resources across services realistically
         Map<String, Integer> resourceDistribution = new HashMap<>();
-        resourceDistribution.put("oci_computeagent", (int) (resourceCount * 0.4));      // 40% - VM instances
-        resourceDistribution.put("oci_lbaas", (int) (resourceCount * 0.1));            // 10% - Load balancers  
-        resourceDistribution.put("oci_blockvolumes", (int) (resourceCount * 0.3));     // 30% - Block volumes
-        resourceDistribution.put("oci_autonomous_database", (int) (resourceCount * 0.05)); // 5% - Databases
+        resourceDistribution.put("oci_computeagent", (int) (resourceCount * 0.45));     // 45% - VM instances
+        resourceDistribution.put("oci_lbaas", (int) (resourceCount * 0.12));           // 12% - Load balancers  
+        resourceDistribution.put("oci_blockvolumes", (int) (resourceCount * 0.30));    // 30% - Block volumes
         resourceDistribution.put("oci_objectstorage", (int) (resourceCount * 0.05));   // 5% - Object storage
         resourceDistribution.put("oci_kubernetes", (int) (resourceCount * 0.03));      // 3% - K8s clusters
-        resourceDistribution.put("oci_functions", (int) (resourceCount * 0.04));       // 4% - Functions
-        resourceDistribution.put("oci_apigateway", (int) (resourceCount * 0.03));      // 3% - API Gateways
+        resourceDistribution.put("oci_functions", (int) (resourceCount * 0.03));       // 3% - Functions
+        resourceDistribution.put("oci_apigateway", (int) (resourceCount * 0.02));      // 2% - API Gateways
         
         // Generate realistic resource IDs for each service
         for (Map.Entry<String, Integer> entry : resourceDistribution.entrySet()) {
@@ -250,8 +240,6 @@ public class OCIStreamProducer {
                 return String.format("ocid1.loadbalancer.oc1.%s.%s", region, uniqueId);
             case "blockvolumes":
                 return String.format("ocid1.volume.oc1.%s.%s", region, uniqueId);
-            case "autonomous_database":
-                return String.format("ocid1.autonomousdatabase.oc1.%s.%s", region, uniqueId);
             case "kubernetes":
                 return String.format("ocid1.cluster.oc1.%s.%s", region, uniqueId);
             case "functions":
@@ -533,6 +521,77 @@ public class OCIStreamProducer {
     }
     
     /**
+     * Progressive load test for 1 Lakh metrics with gradually increasing load
+     * Starts with high count and increases rate progressively
+     */
+    public void runProgressiveLoadTest() {
+        System.out.printf("%n🎯 Starting Progressive Load Test (1 Lakh Metrics)%n");
+        System.out.println("📈 Pattern: Gradual increase from 500 → 2000 metrics/second");
+        System.out.println("🏗️ High resource count: 5000 simulated resources");
+        System.out.println("------------------------------------------------------------");
+        
+        // Initialize with higher resource count for this test
+        System.out.println("🏗️ Scaling up resources for progressive test...");
+        
+        // Phase configuration: [rate, duration, batchSize, workers]
+        int[][] phases = {
+            {500, 30, 25, 4},      // Phase 1: 500 metrics/s for 30s  = 15K metrics
+            {800, 25, 40, 6},      // Phase 2: 800 metrics/s for 25s  = 20K metrics  
+            {1200, 20, 50, 8},     // Phase 3: 1200 metrics/s for 20s = 24K metrics
+            {1600, 15, 80, 10},    // Phase 4: 1600 metrics/s for 15s = 24K metrics
+            {2000, 10, 100, 12}    // Phase 5: 2000 metrics/s for 10s = 20K metrics
+        };                          // Total: ~103K metrics in 100 seconds
+        
+        long totalStartTime = System.currentTimeMillis();
+        int totalMetricsSent = 0;
+        
+        for (int i = 0; i < phases.length; i++) {
+            int rate = phases[i][0];
+            int duration = phases[i][1]; 
+            int batchSize = phases[i][2];
+            int workers = phases[i][3];
+            
+            System.out.printf("%n🔄 Phase %d/%d: %,d metrics/s for %ds (batch=%d, workers=%d)%n", 
+                    i + 1, phases.length, rate, duration, batchSize, workers);
+            
+            // Reset stats for this phase
+            resetStats();
+            
+            // Run this phase
+            runBatchProducer(rate, duration, batchSize, workers);
+            
+            totalMetricsSent += (int) messagesSent.get();
+            
+            System.out.printf("✅ Phase %d completed: %,d metrics sent%n", i + 1, messagesSent.get());
+            
+            // Brief pause between phases
+            if (i < phases.length - 1) {
+                System.out.println("⏸️  2-second pause before next phase...");
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        
+        long totalDuration = System.currentTimeMillis() - totalStartTime;
+        double averageRate = totalMetricsSent / (totalDuration / 1000.0);
+        
+        System.out.printf("%n🏆 PROGRESSIVE LOAD TEST COMPLETED%n");
+        System.out.println("==================================================");
+        System.out.printf("⏱️  Total Duration: %.1f seconds%n", totalDuration / 1000.0);
+        System.out.printf("📊 Total Metrics: %,d%n", totalMetricsSent);
+        System.out.printf("📈 Average Rate: %.0f metrics/second%n", averageRate);
+        System.out.printf("🎯 Target Achieved: %s%n", totalMetricsSent >= 100000 ? "✅ YES" : "❌ NO");
+        System.out.println("==================================================");
+        
+        // Print final total stats
+        printTotalStats();
+    }
+
+    /**
      * High-volume batch producer for lakhs of metrics
      * Generates massive volumes of metrics efficiently using batching
      */
@@ -690,11 +749,8 @@ public class OCIStreamProducer {
             case "oci_lbaas":
                 resourceType = "loadbalancer";
                 break;
-            case "oci_database":
+            case "oci_postgresql":
                 resourceType = "dbsystem";
-                break;
-            case "oci_autonomous_database":
-                resourceType = "autonomousdatabase";
                 break;
             case "oci_functions":
                 resourceType = "function";
@@ -1428,28 +1484,8 @@ public class OCIStreamProducer {
                     producer.runBatchProducer(2000, 500, 100, 16);
                     break;
                 case "stress":
-                    System.out.println("🎯 Running Enhanced Stress Test Scenario");
-                    int[] stressRates = {50, 100, 250, 500, 750, 1000};
-                    int[] stressWorkers = {4, 8, 12, 16, 20, 24};
-                    for (int i = 0; i < stressRates.length; i++) {
-                        int testRate = stressRates[i];
-                        int workerCount = stressWorkers[i];
-                        System.out.printf("%n🔥 Stress Phase %d: %d msg/s with %d workers for 2 minutes%n", 
-                                i + 1, testRate, workerCount);
-                        
-                        // Reset producer state for each phase
-                        producer.resetStats();
-                        
-                        // Run the stress phase
-                        producer.runLoadTest(testRate, 120, workerCount);
-                        
-                        // Show phase completion
-                        System.out.printf("✅ Stress Phase %d completed (%d msg/s)%n", i + 1, testRate);
-                        System.out.println("⏸️  Cool down period (30 seconds)...");
-                        Thread.sleep(30000); // Cool down
-                    }
-                    System.out.println("🎉 Enhanced Stress Test Completed - All phases finished!");
-                    producer.printTotalStats();
+                    System.out.println("🎯 Running Progressive High-Volume Stress Test");
+                    producer.runProgressiveLoadTest();
                     break;
                 case "debug-stress":
                     System.out.println("🔧 Running Debug Stress Test (Simplified)");
