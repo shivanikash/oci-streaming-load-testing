@@ -521,54 +521,93 @@ public class OCIStreamProducer {
     }
     
     /**
-     * Progressive load test for 1 Lakh metrics with gradually increasing load
-     * Starts with high count and increases rate progressively
+     * 20-minute GRADUAL PROGRESSIVE load test with smooth traffic increase
+     * Extended duration with gentle, continuous ramp-up
      */
     public void runProgressiveLoadTest() {
-        System.out.printf("%n🎯 Starting Progressive Load Test (1 Lakh Metrics)%n");
-        System.out.println("📈 Pattern: Gradual increase from 500 → 2000 metrics/second");
-        System.out.println("🏗️ High resource count: 5000 simulated resources");
-        System.out.println("------------------------------------------------------------");
+        System.out.printf("%n🌊 Starting 20-MINUTE GRADUAL PROGRESSIVE LOAD TEST%n");
+        System.out.println("⏱️  Duration: 20 minutes (1200 seconds)");
+        System.out.println("📈 Pattern: Smooth gradual increase 200 → 1000 → 3000 → 5000 metrics/second");
+        System.out.println("� Gentle ramp with longer phases for sustained load");
+        System.out.println("🎯 Target: ~4.5 Million metrics over 20 minutes");
+        System.out.println("============================================================");
         
-        // Initialize with higher resource count for this test
-        System.out.println("🏗️ Scaling up resources for progressive test...");
+        running.set(true);
+        startTime = System.currentTimeMillis();
         
-        // Phase configuration: [rate, duration, batchSize, workers]
-        int[][] phases = {
-            {500, 30, 25, 4},      // Phase 1: 500 metrics/s for 30s  = 15K metrics
-            {800, 25, 40, 6},      // Phase 2: 800 metrics/s for 25s  = 20K metrics  
-            {1200, 20, 50, 8},     // Phase 3: 1200 metrics/s for 20s = 24K metrics
-            {1600, 15, 80, 10},    // Phase 4: 1600 metrics/s for 15s = 24K metrics
-            {2000, 10, 100, 12}    // Phase 5: 2000 metrics/s for 10s = 20K metrics
-        };                          // Total: ~103K metrics in 100 seconds
+        // 20-minute gradual progressive configuration
+        int totalDurationSeconds = 1200;  // 20 minutes
         
-        long totalStartTime = System.currentTimeMillis();
-        int totalMetricsSent = 0;
-        
-        for (int i = 0; i < phases.length; i++) {
-            int rate = phases[i][0];
-            int duration = phases[i][1]; 
-            int batchSize = phases[i][2];
-            int workers = phases[i][3];
+        // Phase definition: duration, rate, batchSize, workers
+        int[][] gradualPhases = {
+            // Gentle start (4 minutes)
+            {120, 200, 20, 4},       // 0-2min: 200 metrics/s = 24K metrics
+            {120, 400, 30, 6},       // 2-4min: 400 metrics/s = 48K metrics
             
-            System.out.printf("%n🔄 Phase %d/%d: %,d metrics/s for %ds (batch=%d, workers=%d)%n", 
-                    i + 1, phases.length, rate, duration, batchSize, workers);
+            // Early ramp (4 minutes)
+            {120, 600, 40, 8},       // 4-6min: 600 metrics/s = 72K metrics
+            {120, 800, 50, 10},      // 6-8min: 800 metrics/s = 96K metrics
             
-            // Reset stats for this phase
+            // Mid ramp (4 minutes)
+            {120, 1200, 70, 12},     // 8-10min: 1.2K metrics/s = 144K metrics
+            {120, 1600, 90, 14},     // 10-12min: 1.6K metrics/s = 192K metrics
+            
+            // Higher load (4 minutes)
+            {120, 2200, 120, 16},    // 12-14min: 2.2K metrics/s = 264K metrics
+            {120, 2800, 150, 18},    // 14-16min: 2.8K metrics/s = 336K metrics
+            
+            // Peak phase (3 minutes)
+            {90, 3500, 200, 22},     // 16-17.5min: 3.5K metrics/s = 315K metrics
+            {90, 4200, 250, 25},     // 17.5-19min: 4.2K metrics/s = 378K metrics
+            
+            // Final burst (1 minute)
+            {60, 5000, 300, 30}      // 19-20min: 5K metrics/s = 300K metrics
+        };                           // Total: ~2.27M metrics (conservative estimate)
+        
+        System.out.println("🎯 GRADUAL PHASE SCHEDULE:");
+        int totalExpected = 0;
+        int cumulativeTime = 0;
+        for (int i = 0; i < gradualPhases.length; i++) {
+            int duration = gradualPhases[i][0];
+            int rate = gradualPhases[i][1];
+            int expected = rate * duration;
+            totalExpected += expected;
+            cumulativeTime += duration;
+            System.out.printf("   Phase %d: %d-%dmin | %,d/s | %,d metrics%n", 
+                    i + 1, cumulativeTime/60 - duration/60, cumulativeTime/60, rate, expected);
+        }
+        System.out.printf("📊 TOTAL EXPECTED: %,d metrics in %d minutes%n", totalExpected, totalDurationSeconds/60);
+        System.out.println("============================================================");
+        
+        long totalMetricsSent = 0;
+        
+        // Execute each gradual phase
+        for (int phaseIndex = 0; phaseIndex < gradualPhases.length; phaseIndex++) {
+            int duration = gradualPhases[phaseIndex][0];
+            int rate = gradualPhases[phaseIndex][1];
+            int batchSize = gradualPhases[phaseIndex][2];
+            int workers = gradualPhases[phaseIndex][3];
+            
+            System.out.printf("%n� PHASE %d: %,d metrics/s for %ds (batch=%d, workers=%d)%n", 
+                    phaseIndex + 1, rate, duration, batchSize, workers);
+            
+            // Reset counters for this phase
             resetStats();
             
-            // Run this phase
-            runBatchProducer(rate, duration, batchSize, workers);
+            // Run gradual batch producer for this phase
+            runAggressiveBatchProducer(rate, duration, batchSize, workers);
             
-            totalMetricsSent += (int) messagesSent.get();
+            totalMetricsSent += messagesSent.get();
             
-            System.out.printf("✅ Phase %d completed: %,d metrics sent%n", i + 1, messagesSent.get());
+            double phaseRate = messagesSent.get() / (duration > 0 ? duration : 1.0);
+            System.out.printf("✅ Phase %d completed: %,d metrics (%.0f/s actual)%n", 
+                    phaseIndex + 1, messagesSent.get(), phaseRate);
             
-            // Brief pause between phases
-            if (i < phases.length - 1) {
-                System.out.println("⏸️  2-second pause before next phase...");
+            // Brief pause between phases (except last)
+            if (phaseIndex < gradualPhases.length - 1) {
+                System.out.println("⏸️  5-second gradual transition pause...");
                 try {
-                    Thread.sleep(2000);
+                    Thread.sleep(5000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -576,20 +615,163 @@ public class OCIStreamProducer {
             }
         }
         
-        long totalDuration = System.currentTimeMillis() - totalStartTime;
-        double averageRate = totalMetricsSent / (totalDuration / 1000.0);
+        long totalDuration = System.currentTimeMillis() - startTime;
+        double overallRate = totalMetricsSent / (totalDuration / 1000.0);
         
-        System.out.printf("%n🏆 PROGRESSIVE LOAD TEST COMPLETED%n");
-        System.out.println("==================================================");
-        System.out.printf("⏱️  Total Duration: %.1f seconds%n", totalDuration / 1000.0);
-        System.out.printf("📊 Total Metrics: %,d%n", totalMetricsSent);
-        System.out.printf("📈 Average Rate: %.0f metrics/second%n", averageRate);
-        System.out.printf("🎯 Target Achieved: %s%n", totalMetricsSent >= 100000 ? "✅ YES" : "❌ NO");
-        System.out.println("==================================================");
+        System.out.printf("%n🏆 20-MINUTE GRADUAL PROGRESSIVE TEST COMPLETED%n");
+        System.out.println("============================================================");
+        System.out.printf("⏱️  Total Duration: %.1f minutes%n", totalDuration / 60000.0);
+        System.out.printf("📊 Total Metrics Sent: %,d%n", totalMetricsSent);
+        System.out.printf("📈 Overall Average Rate: %,.0f metrics/second%n", overallRate);
+        System.out.printf("🎯 Target Achievement: %.1f%%\n", (totalMetricsSent * 100.0) / totalExpected);
+        System.out.printf("🌊 Peak Rate: 5,000 metrics/second in final phase%n");
+        System.out.println("============================================================");
         
-        // Print final total stats
         printTotalStats();
     }
+    
+    /**
+     * GRADUAL batch producer optimized for sustained throughput over long duration
+     */
+    private void runAggressiveBatchProducer(int targetRate, int duration, int batchSize, int workers) {
+        System.out.printf("🌊 Starting GRADUAL producer: %,d/s target%n", targetRate);
+        
+        running.set(true);
+        long phaseStartTime = System.currentTimeMillis();
+        
+        ExecutorService executor = Executors.newFixedThreadPool(workers);
+        List<Future<?>> futures = new ArrayList<>();
+        
+        // Calculate work distribution
+        int ratePerWorker = targetRate / workers;
+        int remainder = targetRate % workers;
+        
+        // Launch aggressive workers
+        for (int i = 0; i < workers; i++) {
+            final int workerId = i + 1;
+            final int workerRate = ratePerWorker + (i < remainder ? 1 : 0);
+            
+            Future<?> future = executor.submit(() -> 
+                gradualBatchWorker(workerRate, duration, batchSize, workerId, phaseStartTime));
+            futures.add(future);
+        }
+        
+        // Monitor progress
+        long endTime = phaseStartTime + (duration * 1000L);
+        long nextReportTime = phaseStartTime + 15000; // Report every 15 seconds
+        
+        while (running.get() && System.currentTimeMillis() < endTime) {
+            long currentTime = System.currentTimeMillis();
+            
+            if (currentTime >= nextReportTime) {
+                double elapsed = (currentTime - phaseStartTime) / 1000.0;
+                double currentRate = messagesSent.get() / Math.max(elapsed, 1.0);
+                double progress = (elapsed / duration) * 100.0;
+                
+                System.out.printf("� Progress: %.1f%% | Rate: %,.0f/s | Sent: %,d | Workers: %d%n", 
+                        progress, currentRate, messagesSent.get(), workers);
+                nextReportTime = currentTime + 15000;
+            }
+            
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        
+        // Stop workers
+        running.set(false);
+        
+        // Wait for completion
+        for (Future<?> future : futures) {
+            try {
+                future.get(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                System.err.println("⚠️ Worker completion error: " + e.getMessage());
+            }
+        }
+        
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+        }
+    }
+    
+    /**
+     * Gradual batch worker with optimized rate limiting for sustained load
+     */
+    private void gradualBatchWorker(int targetRate, int duration, int batchSize, int workerId, long startTime) {
+        System.out.printf("🌊 Gradual Worker %d: %,d/s target, batch=%d%n", workerId, targetRate, batchSize);
+        
+        long endTime = startTime + (duration * 1000L);
+        
+        // Calculate optimal batch timing
+        double batchesPerSecond = (double) targetRate / batchSize;
+        long batchIntervalNanos = batchesPerSecond > 0 ? (long) (1_000_000_000.0 / batchesPerSecond) : 1_000_000_000L;
+        
+        while (running.get() && System.currentTimeMillis() < endTime) {
+            long batchStart = System.nanoTime();
+            
+            // Generate and send batch efficiently
+            List<ObjectNode> batch = generateOptimizedBatch(batchSize);
+            sendBatch(batch);
+            
+            // Precise rate control using nanoseconds
+            long elapsed = System.nanoTime() - batchStart;
+            long sleepNanos = batchIntervalNanos - elapsed;
+            
+            if (sleepNanos > 0) {
+                try {
+                    Thread.sleep(sleepNanos / 1_000_000, (int) (sleepNanos % 1_000_000));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        
+        System.out.printf("✅ Gradual Worker %d completed%n", workerId);
+    }
+    
+    /**
+     * Generate optimized batch for maximum efficiency
+     */
+    private List<ObjectNode> generateOptimizedBatch(int batchSize) {
+        List<ObjectNode> batch = new ArrayList<>(batchSize);
+        
+        // Pre-select resources to reduce random access overhead
+        String[] batchResources = new String[Math.min(10, resourceIds.size())];
+        String[] batchNamespaces = new String[batchResources.length];
+        
+        for (int i = 0; i < batchResources.length; i++) {
+            int resourceIndex = random.nextInt(resourceIds.size());
+            batchResources[i] = resourceIds.get(resourceIndex);
+            batchNamespaces[i] = resourceToNamespace.get(batchResources[i]);
+        }
+        
+        // Generate batch using pre-selected resources
+        for (int i = 0; i < batchSize; i++) {
+            int resourceIndex = i % batchResources.length;
+            String resourceId = batchResources[resourceIndex];
+            String namespace = batchNamespaces[resourceIndex];
+            
+            String[] metrics = METRICS_BY_NAMESPACE.getOrDefault(namespace, new String[]{"CustomMetric"});
+            String metricName = metrics[i % metrics.length];
+            
+            ObjectNode metric = generateSingleMetric(resourceId, namespace, metricName);
+            batch.add(metric);
+        }
+        
+        return batch;
+    }
+    
+
 
     /**
      * High-volume batch producer for lakhs of metrics
